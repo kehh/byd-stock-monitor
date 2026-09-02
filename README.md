@@ -2,7 +2,7 @@
 
 Monitors the EVDealer Group BYD inventory page for a **BYD Atto 2 Dynamic**
 becoming available anywhere in **Australia (all states)**, and sends an email
-to `you@example.com` when one appears.
+to the configured `TO_EMAIL` address when one appears.
 
 ## How it works
 
@@ -29,7 +29,9 @@ uv run python graph.py
 
 ## Requirements
 
-- Python 3.11+ with the project dependencies installed via `uv sync`.
+- Python 3.11+ with the project dependencies installed via `uv sync`
+  (runtime is stdlib-only; the chart is rendered client-side with Plotly.js
+  from a CDN).
 - Optional: a Gmail account and App Password to enable email sending.
 
 ## Run it
@@ -42,12 +44,15 @@ Run it periodically to check for new stock (e.g. cron every 5 minutes, replaced
 by the scheduled GitHub Actions workflow if you use the hosted deployment):
 
 ```crontab
-*/5 * * * * cd /path/to/byd/code/byd && /path/to/byd/code/byd/.venv/bin/python3 /path/to/byd/code/byd/monitor.py >> /path/to/byd/code/byd/monitor.log 2>&1
+*/5 * * * * cd /path/to/byd && /path/to/byd/.venv/bin/python3 /path/to/byd/monitor.py >> /path/to/byd/monitor.log 2>&1
 ```
 
 ## Files
 
 - `monitor.py` — the monitoring script.
+- `graph.py` — renders `index.html` with an interactive stock chart
+  (Plotly.js) plus the latest counts table.
+- `index.html` — the generated interactive page (served on GitHub Pages).
 - `state.json` — stock numbers already seen (so you're not re-notified).
 - `notifications.log` — every new match, with timestamp, stock #, price,
   status and pickup location.
