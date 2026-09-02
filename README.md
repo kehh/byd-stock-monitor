@@ -29,19 +29,20 @@ uv run python graph.py
 
 ## Requirements
 
-- Python 3 (stdlib only — no third-party packages).
+- Python 3.11+ with the project dependencies installed via `uv sync`.
 - Optional: a Gmail account and App Password to enable email sending.
 
 ## Run it
 
 ```bash
-python3 monitor.py
+uv run python monitor.py
 ```
 
-Run it periodically to check for new stock (e.g. cron every 5 minutes):
+Run it periodically to check for new stock (e.g. cron every 5 minutes, replaced
+by the scheduled GitHub Actions workflow if you use the hosted deployment):
 
 ```crontab
-*/5 * * * * cd /path/to/byd/code/byd && /path/to/byd/code/byd/venv/bin/python3 /path/to/byd/code/byd/monitor.py >> /path/to/byd/code/byd/monitor.log 2>&1
+*/5 * * * * cd /path/to/byd/code/byd && /path/to/byd/code/byd/.venv/bin/python3 /path/to/byd/code/byd/monitor.py >> /path/to/byd/code/byd/monitor.log 2>&1
 ```
 
 ## Files
@@ -66,7 +67,7 @@ removed "Less Secure Apps" access, so you must create an **App Password**:
    export TO_EMAIL=you@example.com
    export GMAIL_USER=<your-gmail-address>
    export GMAIL_APP_PASSWORD=<16-char-app-password>
-   python3 monitor.py
+   uv run python monitor.py
    ```
 
 When a new Atto 2 Dynamic is found in any state, you'll get an email with the
