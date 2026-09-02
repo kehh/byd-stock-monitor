@@ -1,26 +1,32 @@
-# BYD Atto 2 Dynamic Stock Monitor
+# BYD Stock Monitor
 
-Monitors the EVDealer Group BYD inventory page for a **BYD Atto 2 Dynamic**
-becoming available anywhere in **Australia (all states)**, and sends an email
-to the configured `TO_EMAIL` address when one appears.
+Monitors the EVDealer Group BYD inventory page for **all BYD models**
+across **Australia (all states)**, recording stock by (state, model, variant,
+colour). Emails are sent only for **Atto 2 Dynamic** units when credentials
+are configured.
 
 ## How it works
 
 The script fetches the server-rendered inventory page
 (`https://evdealergroup-byd.com.au/inventory?type=d`), parses every vehicle
-card, and prints a table of **Atto 2** units counted by state and variant
-(Dynamic, Premium, plus any demo models). Newly-seen **Dynamic** units are
-recorded in `notifications.log` and emailed if email is enabled.
+card, and records one history row per (state, model, variant, colour) cell.
+All 12 models and 25 known paint colours are tracked. Newly-seen **Atto 2
+Dynamic** units are logged to `notifications.log` and emailed if email is
+enabled.
 
 ## Dependencies
 
-Managed with [uv](https://docs.astral.sh/uv/):
+You need two files and one tool:
+
+- `monitor.py` — fetches inventory, parses cards, appends history, sends emails
+- `graph.py` — renders `index.html` dashboard from history
+- [uv](https://docs.astral.sh/uv/) — runs the scripts
 
 ```bash
 uv sync
 ```
 
-Then run the monitor and graph generator:
+Then run:
 
 ```bash
 uv run python monitor.py
@@ -30,8 +36,8 @@ uv run python graph.py
 ## Requirements
 
 - Python 3.11+ with the project dependencies installed via `uv sync`
-  (runtime is stdlib-only; the chart is rendered client-side with Plotly.js
-  from a CDN).
+  (runtime is stdlib-only; the dashboard uses Tailwind, Alpine.js and Plotly
+  loaded from CDN).
 - Optional: a Gmail account and App Password to enable email sending.
 
 ## Run it
@@ -47,16 +53,36 @@ by the scheduled GitHub Actions workflow if you use the hosted deployment):
 */5 * * * * cd /path/to/byd && /path/to/byd/.venv/bin/python3 /path/to/byd/monitor.py >> /path/to/byd/monitor.log 2>&1
 ```
 
+## Models tracked
+
+All 12 BYD models: Atto 1, Atto 2, Atto 3, Seal, Seal 6, Seal 6 Touring,
+Sealion 5, Sealion 6, Sealion 7, Sealion 8, Shark 6, Dolphin.
+
+Paint colours: 25 known colour tokens (Apricity White, Arctic Blue, Arctic
+White, Atlantis Grey, Aurora White, Black, Black Brown, Black Grey, Blue Grey,
+Cosmos Black, Dark Aquamarine, Deep Sea Blue, Great White, Grey Black, Harbour
+Grey, Mist Grey, Outback Orange, Pine Lime, Ridge Grey, Sage Green, Shark Grey,
+Ski White, Stone Grey, Thaumas Black, Tidal Black). Unknown colours fall back
+to "Unknown".
+
 ## Files
 
 - `monitor.py` — the monitoring script.
-- `graph.py` — renders `index.html` with an interactive stock chart
-  (Plotly.js) plus the latest counts table.
+- `graph.py` — renders `index.html` with the model-spotlight dashboard.
 - `index.html` — the generated interactive page (served on GitHub Pages).
+- `history.csv` — one row per (state, model, variant, colour) per poll.
+- `history-legacy.csv` — pre-multi-model Atto-2-only history (archived).
 - `state.json` — stock numbers already seen (so you're not re-notified).
-- `notifications.log` — every new match, with timestamp, stock #, price,
-  status and pickup location.
+- `notifications.log` — every new Atto 2 Dynamic match, with timestamp,
+  stock #, price, status and pickup location.
 - `.env.example` — template for the email credentials.
+
+## Dashboard
+
+`index.html` is a model-spotlight page: pick a model from the chip bar to
+see its colour breakdown (bar chart), variant time-series (line chart), and
+per-state counts. Built with Tailwind CSS, Alpine.js and Plotly.js, all
+loaded from CDN — no build step required.
 
 ## Enabling email notifications
 

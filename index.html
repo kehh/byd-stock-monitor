@@ -3,34 +3,106 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BYD Atto 2 Stock Monitor</title>
+<title>BYD Stock Monitor</title>
+<script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-<style>
-body { font-family: sans-serif; margin: 2rem auto; max-width: 1000px; padding: 0 1rem; }
-h1 { font-size: 1.5rem; }
-h2 { font-size: 1.1rem; }
-table { border-collapse: collapse; margin-top: 1rem; }
-th, td { border: 1px solid #ccc; padding: 0.4rem 0.8rem; text-align: left; }
-</style>
+<script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
 </head>
-<body>
-<h1>BYD Atto 2 Stock Monitor</h1>
-<p>Click a legend entry to show or hide that series. Hover over points
-for details. Times are UTC.</p>
-<div id="chart"></div>
-<h2>Latest counts by state &amp; variant:</h2>
-<table>
-<tr><th>State / Variant</th><th>Latest count</th></tr>
-<tr><td>ACT Premium</td><td>6</td></tr><tr><td>NSW Dynamic</td><td>5</td></tr><tr><td>NSW Premium</td><td>6</td></tr><tr><td>NT Premium</td><td>1</td></tr><tr><td>QLD Dynamic</td><td>14</td></tr><tr><td>QLD Premium</td><td>15</td></tr><tr><td>SA Dynamic</td><td>3</td></tr><tr><td>SA Premium</td><td>20</td></tr><tr><td>TAS Dynamic</td><td>2</td></tr><tr><td>TAS Premium</td><td>11</td></tr><tr><td>VIC Dynamic</td><td>19</td></tr><tr><td>VIC Premium</td><td>32</td></tr><tr><td>WA Premium</td><td>10</td></tr>
-</table>
+<body class="bg-slate-100 text-slate-800" x-data="dashboard()" x-init="select('Atto 1')">
+<header class="bg-white border-b border-slate-200">
+  <div class="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold">BYD Stock Monitor</h1>
+      <p class="text-sm text-slate-500">Australian dealership inventory by model, variant &amp; colour. Times are UTC.</p>
+    </div>
+    <div class="text-right text-sm text-slate-500" x-text="'Latest poll: ' + model.latest_ts"></div>
+  </div>
+  <nav class="max-w-5xl mx-auto px-6 pb-3 flex flex-wrap gap-2">
+    <template x-for="m in model.models" :key="m">
+      <button
+        type="button"
+        class="px-4 py-1.5 rounded-full text-sm font-medium transition"
+        :class="selected === m ? 'bg-sky-600 text-white shadow' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'"
+        x-text="m"
+        @click="select(m)"></button>
+    </template>
+  </nav>
+</header>
+
+<main class="max-w-5xl mx-auto px-6 py-6 space-y-6">
+  <section class="bg-white rounded-xl shadow-sm p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-semibold" x-text="selected + ' — colour availability'"></h2>
+      <div class="flex items-center gap-3 text-sm">
+        <span class="text-slate-500">Total units</span>
+        <span class="text-2xl font-bold text-sky-600" x-text="total"></span>
+      </div>
+    </div>
+    <div id="colourChart" class="h-64"></div>
+  </section>
+
+  <section class="bg-white rounded-xl shadow-sm p-6">
+    <h2 class="text-lg font-semibold mb-1" x-text="selected + ' — units over time'"></h2>
+    <p class="text-sm text-slate-500 mb-4">Click a legend entry to show or hide that variant.</p>
+    <div id="seriesChart" class="h-80"></div>
+  </section>
+
+  <section class="bg-white rounded-xl shadow-sm p-6">
+    <h2 class="text-lg font-semibold mb-4" x-text="selected + ' — counts by state'"></h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <template x-for="(count, state) in stateCounts" :key="state">
+        <div class="bg-slate-50 rounded-lg p-3 border border-slate-200">
+          <div class="text-sm text-slate-500" x-text="state"></div>
+          <div class="text-2xl font-semibold" x-text="count"></div>
+        </div>
+      </template>
+      <div x-show="Object.keys(stateCounts).length === 0" class="col-span-full text-slate-400 text-sm">No state counts yet.</div>
+    </div>
+  </section>
+</main>
+
 <script>
-const TRACES = [{"name": "ACT Premium", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#1f77b4"}, {"name": "NSW Dynamic", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#ff7f0e"}, {"name": "NSW Premium", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#2ca02c"}, {"name": "NT Premium", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#d62728"}, {"name": "QLD Dynamic", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#9467bd"}, {"name": "QLD Premium", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 15, 15, 15, 15, 15], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#8c564b"}, {"name": "SA Dynamic", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#e377c2"}, {"name": "SA Premium", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#7f7f7f"}, {"name": "TAS Dynamic", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#bcbd22"}, {"name": "TAS Premium", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#17becf"}, {"name": "VIC Dynamic", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#393b79"}, {"name": "VIC Premium", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [29, 30, 30, 30, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#9c9ede"}, {"name": "WA Premium", "x": ["2026-09-02T01:24:25Z", "2026-09-02T01:31:44Z", "2026-09-02T01:31:48Z", "2026-09-02T01:40:10Z", "2026-09-02T01:51:52Z", "2026-09-02T02:01:58Z", "2026-09-02T02:12:02Z", "2026-09-02T02:22:06Z", "2026-09-02T02:32:10Z", "2026-09-02T02:42:13Z", "2026-09-02T02:52:17Z", "2026-09-02T03:02:21Z", "2026-09-02T03:12:26Z", "2026-09-02T03:22:30Z", "2026-09-02T03:32:33Z"], "y": [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10], "mode": "lines+markers", "line": {"width": 2}, "marker": {"size": 6}, "color": "#1f77b4"}];
-Plotly.newPlot("chart", TRACES, {
-  xaxis: { title: "Date (UTC)" },
-  yaxis: { title: "Units available" },
-  legend: { orientation: "h", y: -0.2 },
-  margin: { t: 20, r: 20, b: 50, l: 60 },
-});
+const MODELS = {"models": ["Atto 1", "Atto 2", "Atto 3", "Dolphin", "Seal", "Seal 6", "Seal 6 Touring", "Sealion 5", "Sealion 6", "Sealion 7", "Sealion 8", "Shark 6"], "latest_ts": "2026-09-02 06:09:33 UTC", "snapshots": {"Atto 1": {"Black Grey": 94, "Cosmos Black": 60, "Apricity White": 76}, "Atto 2": {"Black": 69, "Cosmos Black": 44, "Harbour Grey": 46, "Mist Grey": 1, "Ski White": 1}, "Atto 3": {"Cosmos Black": 3, "Harbour Grey": 7, "Blue Grey": 5}, "Dolphin": {"Atlantis Grey": 39, "Grey Black": 34, "Harbour Grey": 43, "Ski White": 1}, "Seal": {"Thaumas Black": 94, "Cosmos Black": 21}, "Seal 6": {"Arctic White": 10}, "Seal 6 Touring": {"Arctic White": 14, "Black": 6, "Cosmos Black": 11, "Sage Green": 10}, "Sealion 5": {"Aurora White": 31, "Black": 31, "Cosmos Black": 22, "Harbour Grey": 29, "Atlantis Grey": 1}, "Sealion 6": {"Arctic White": 69, "Black Brown": 90, "Cosmos Black": 28, "Harbour Grey": 32, "Stone Grey": 36}, "Sealion 7": {"Thaumas Black": 140, "Cosmos Black": 31}, "Sealion 8": {"Aurora White": 93, "Black": 68, "Cosmos Black": 57, "Dark Aquamarine": 63, "Ridge Grey": 13}, "Shark 6": {"Thaumas Black": 146, "Deep Sea Blue": 48}}, "timeseries": {"Atto 1": {"Essential": {"dates": ["2026-09-02T06:09:33Z"], "counts": [124]}, "Premium": {"dates": ["2026-09-02T06:09:33Z"], "counts": [106]}}, "Atto 2": {"Premium": {"dates": ["2026-09-02T06:09:33Z"], "counts": [111]}, "Dynamic": {"dates": ["2026-09-02T06:09:33Z"], "counts": [50]}}, "Atto 3": {"Essential": {"dates": ["2026-09-02T06:09:33Z"], "counts": [8]}, "Premium": {"dates": ["2026-09-02T06:09:33Z"], "counts": [5]}, "Essential MY25": {"dates": ["2026-09-02T06:09:33Z"], "counts": [2]}}, "Dolphin": {"Essential": {"dates": ["2026-09-02T06:09:33Z"], "counts": [71]}, "Premium": {"dates": ["2026-09-02T06:09:33Z"], "counts": [46]}}, "Seal": {"Performance": {"dates": ["2026-09-02T06:09:33Z"], "counts": [59]}, "Premium": {"dates": ["2026-09-02T06:09:33Z"], "counts": [55]}, "Dynamic": {"dates": ["2026-09-02T06:09:33Z"], "counts": [1]}}, "Seal 6": {"Essential": {"dates": ["2026-09-02T06:09:33Z"], "counts": [10]}}, "Seal 6 Touring": {"Premium": {"dates": ["2026-09-02T06:09:33Z"], "counts": [41]}}, "Sealion 5": {"Essential": {"dates": ["2026-09-02T06:09:33Z"], "counts": [91]}, "Premium": {"dates": ["2026-09-02T06:09:33Z"], "counts": [23]}}, "Sealion 6": {"Dynamic Extended": {"dates": ["2026-09-02T06:09:33Z"], "counts": [44]}, "Essential": {"dates": ["2026-09-02T06:09:33Z"], "counts": [93]}, "Premium Extended": {"dates": ["2026-09-02T06:09:33Z"], "counts": [118]}}, "Sealion 7": {"Performance": {"dates": ["2026-09-02T06:09:33Z"], "counts": [56]}, "Premium": {"dates": ["2026-09-02T06:09:33Z"], "counts": [115]}}, "Sealion 8": {"Dynamic AWD": {"dates": ["2026-09-02T06:09:33Z"], "counts": [122]}, "Dynamic FWD": {"dates": ["2026-09-02T06:09:33Z"], "counts": [106]}, "Premium AWD": {"dates": ["2026-09-02T06:09:33Z"], "counts": [66]}}, "Shark 6": {"Dynamic Cab Chassis": {"dates": ["2026-09-02T06:09:33Z"], "counts": [83]}, "Premium": {"dates": ["2026-09-02T06:09:33Z"], "counts": [81]}, "Performance": {"dates": ["2026-09-02T06:09:33Z"], "counts": [30]}}}, "per_state": {"Atto 1": {"ACT": 25, "NSW": 26, "NT": 1, "QLD": 41, "SA": 20, "TAS": 17, "VIC": 66, "WA": 34}, "Atto 2": {"ACT": 6, "NSW": 11, "NT": 1, "QLD": 33, "SA": 23, "TAS": 26, "VIC": 52, "WA": 9}, "Atto 3": {"NSW": 3, "NT": 3, "QLD": 4, "SA": 1, "VIC": 2, "WA": 2}, "Dolphin": {"ACT": 11, "NSW": 11, "NT": 2, "QLD": 27, "SA": 9, "TAS": 1, "VIC": 16, "WA": 40}, "Seal": {"ACT": 10, "NSW": 17, "NT": 1, "QLD": 8, "SA": 19, "TAS": 9, "VIC": 19, "WA": 32}, "Seal 6": {"NSW": 1, "SA": 5, "WA": 4}, "Seal 6 Touring": {"NSW": 1, "QLD": 6, "SA": 15, "TAS": 2, "VIC": 1, "WA": 16}, "Sealion 5": {"ACT": 9, "NSW": 10, "NT": 4, "QLD": 17, "SA": 22, "TAS": 4, "VIC": 27, "WA": 21}, "Sealion 6": {"ACT": 32, "NSW": 33, "QLD": 38, "SA": 38, "TAS": 15, "VIC": 43, "WA": 56}, "Sealion 7": {"ACT": 7, "NSW": 25, "NT": 2, "QLD": 42, "SA": 4, "TAS": 14, "VIC": 51, "WA": 26}, "Sealion 8": {"ACT": 32, "NSW": 41, "NT": 4, "QLD": 69, "SA": 15, "TAS": 26, "VIC": 66, "WA": 41}, "Shark 6": {"ACT": 8, "NSW": 13, "QLD": 23, "SA": 18, "TAS": 8, "VIC": 32, "WA": 92}}};
+
+function dashboard() {
+  return {
+    selected: null,
+    model: MODELS,
+    get total() { return Object.values(this.model.snapshots[this.selected] || {}).reduce((a, b) => a + b, 0); },
+    get stateCounts() { return this.model.per_state[this.selected] || {}; },
+    select(name) {
+      this.selected = name;
+      const snap = this.model.snapshots[name] || {};
+      Plotly.react("colourChart", {
+        x: Object.keys(snap).sort((a, b) => snap[b] - snap[a]),
+        y: Object.values(snap).sort((a, b) => b - a),
+        type: "bar",
+        marker: { color: "#0ea5e9" },
+      }, {
+        xaxis: { title: "Colour", tickangle: -30 },
+        yaxis: { title: "Units available" },
+        margin: { t: 10, r: 10, b: 80, l: 50 },
+        colorway: ["#0ea5e9", "#0369a1", "#f59e0b", "#ef4444", "#10b981", "#8b5cf6", "#f97316", "#14b8a6", "#e11d48", "#84cc16"],
+      });
+      const ts = this.model.timeseries[name] || {};
+      const traces = Object.entries(ts).map(([variant, {dates, counts}], i) => ({
+        name: variant,
+        x: dates,
+        y: counts,
+        mode: "lines+markers",
+        line: { width: 2 },
+        marker: { size: 6 },
+        color: ["#0ea5e9", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#14b8a6"][i % 6],
+      }));
+      Plotly.react("seriesChart", traces, {
+        xaxis: { title: "Date (UTC)" },
+        yaxis: { title: "Units available" },
+        legend: { orientation: "h", y: -0.25 },
+        margin: { t: 10, r: 10, b: 50, l: 50 },
+      });
+    },
+  };
+}
 </script>
 </body>
 </html>
