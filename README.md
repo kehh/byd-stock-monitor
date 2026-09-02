@@ -81,7 +81,8 @@ to "Unknown".
 
 `index.html` is a model-spotlight page: pick a model from the chip bar to
 see its colour breakdown (bar chart), variant time-series (line chart), and
-per-state counts. Built with Tailwind CSS, Alpine.js and Plotly.js, all
+per-state counts. The units-over-time chart can be sliced per state via the
+state pills below it. Built with Tailwind CSS, Alpine.js and Plotly.js, all
 loaded from CDN — no build step required.
 
 ## Enabling email notifications

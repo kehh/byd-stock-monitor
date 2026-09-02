@@ -64,6 +64,24 @@ def per_state_counts(rows: list[dict], model: str, ts: str) -> dict[str, int]:
     return counts
 
 
+def series_by_state(rows: list[dict], model: str) -> dict[str, dict[str, tuple[list[str], list[int]]]]:
+    buckets: dict[str, dict[str, dict[str, int]]] = {}
+    for r in rows:
+        if r["model"] != model:
+            continue
+        state_points = buckets.setdefault(r["state"], {})
+        variant_points = state_points.setdefault(r["variant"], {})
+        variant_points[r["timestamp_utc"]] = variant_points.get(r["timestamp_utc"], 0) + int(r["count"])
+    result: dict[str, dict[str, tuple[list[str], list[int]]]] = {}
+    for state, state_points in buckets.items():
+        series: dict[str, tuple[list[str], list[int]]] = {}
+        for variant, ts_counts in state_points.items():
+            ordered = sorted(ts_counts.items())
+            series[variant] = ([ts for ts, _ in ordered], [c for _, c in ordered])
+        result[state] = series
+    return result
+
+
 def to_iso(timestamp_utc: str) -> str:
     """Convert 'YYYY-MM-DD HH:MM:SS UTC' to 'YYYY-MM-DDTHH:MM:SSZ'."""
     date_part, time_part = timestamp_utc.split(" ", maxsplit=1)
@@ -113,12 +131,27 @@ def _build_dashboard_data(rows: list[dict]) -> dict:
             }
         timeseries[m] = ts_series
     per_state = {m: per_state_counts(rows, m, ts) for m in models}
+    per_model_series = {}
+    for m in models:
+        m_series: dict[str, dict[str, dict]] = {}
+        for state, state_series in series_by_state(rows, m).items():
+            m_series[state] = {
+                variant: {
+                    "dates": [to_iso(d) for d in dates],
+                    "counts": counts,
+                }
+                for variant, (dates, counts) in state_series.items()
+            }
+        per_model_series[m] = m_series
+    states = sorted({r["state"] for r in rows})
     return {
         "models": models,
         "latest_ts": ts,
         "snapshots": snapshots,
         "timeseries": timeseries,
         "per_state": per_state,
+        "series_by_state": per_model_series,
+        "states": states,
     }
 
 
@@ -182,8 +215,20 @@ def render_html(rows: list[dict], out_path: Path) -> Path:
   </section>
 
   <section class="bg-white rounded-xl shadow-sm p-6">
-    <h2 class="text-lg font-semibold mb-1" x-text="selected + ' — units over time'"></h2>
-    <p class="text-sm text-slate-500 mb-4">Click a legend entry to show or hide that variant.</p>
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="text-lg font-semibold" x-text="selected + ' — units over time'"></h2>
+    </div>
+    <p class="text-sm text-slate-500 mb-4">Click a legend entry to show or hide that variant. Filter the lines by state with the pills below; picking a new model resets to all states.</p>
+    <div class="flex flex-wrap gap-2 mb-4">
+      <template x-for="s in model.states" :key="s">
+        <button
+          type="button"
+          class="px-3 py-1 rounded-full text-xs font-medium transition"
+          :class="seriesState === s ? 'bg-sky-600 text-white shadow' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'"
+          x-text="s"
+          @click="seriesState = s; renderSeries()"></button>
+      </template>
+    </div>
     <div id="seriesChart" class="h-80"></div>
   </section>
 
@@ -207,15 +252,18 @@ const MODELS = {data_json};
 function dashboard() {{
   return {{
     selected: null,
+    seriesState: "All states",
     model: MODELS,
     get total() {{ return Object.values(this.model.snapshots[this.selected] || {{}}).reduce((a, b) => a + b, 0); }},
     get stateCounts() {{ return this.model.per_state[this.selected] || {{}}; }},
     select(name) {{
       this.selected = name;
+      this.seriesState = "All states";
       const snap = this.model.snapshots[name] || {{}};
+      const sorted = Object.entries(snap).sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
       Plotly.react("colourChart", {{
-        x: Object.keys(snap).sort((a, b) => snap[b] - snap[a]),
-        y: Object.values(snap).sort((a, b) => b - a),
+        x: sorted.map(([colour]) => colour),
+        y: sorted.map(([, n]) => n),
         type: "bar",
         marker: {{ color: "#0ea5e9" }},
       }}, {{
@@ -224,7 +272,13 @@ function dashboard() {{
         margin: {{ t: 10, r: 10, b: 80, l: 50 }},
         colorway: ["#0ea5e9", "#0369a1", "#f59e0b", "#ef4444", "#10b981", "#8b5cf6", "#f97316", "#14b8a6", "#e11d48", "#84cc16"],
       }});
-      const ts = this.model.timeseries[name] || {{}};
+      this.renderSeries();
+    }},
+    renderSeries() {{
+      const name = this.selected;
+      const ts = this.seriesState === "All states"
+        ? this.model.timeseries[name] || {{}}
+        : (this.model.series_by_state[name] || {{}})[this.seriesState] || {{}};
       const traces = Object.entries(ts).map(([variant, {{dates, counts}}], i) => ({{
         name: variant,
         x: dates,

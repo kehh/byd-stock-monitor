@@ -63,6 +63,22 @@ def test_variant_series_sums_cells_per_poll(tmp_path):
     assert series["Dynamic"][1] == [2, 5]
 
 
+def test_series_by_state_slices_per_state(tmp_path):
+    rows = graph.load_history(write_history(tmp_path, EXAMPLE_ROWS))
+    series = graph.series_by_state(rows, "Atto 2")
+    assert set(series) == {"VIC", "WA"}
+    assert series["VIC"]["Dynamic"][0] == ["2026-01-01 00:00:00 UTC", "2026-01-01 00:10:00 UTC"]
+    assert series["VIC"]["Dynamic"][1] == [2, 3]
+    assert series["WA"]["Dynamic"][0] == ["2026-01-01 00:10:00 UTC"]
+    assert series["WA"]["Dynamic"][1] == [2]
+    assert series["WA"]["Premium"][1] == [1]
+
+
+def test_series_by_state_ignores_other_models(tmp_path):
+    rows = graph.load_history(write_history(tmp_path, EXAMPLE_ROWS))
+    assert graph.series_by_state(rows, "Sealion 8") == {"VIC": {"Premium": (["2026-01-01 00:00:00 UTC"], [4])}}
+
+
 def test_per_state_counts_latest_only(tmp_path):
     rows = graph.load_history(write_history(tmp_path, EXAMPLE_ROWS))
     counts = graph.per_state_counts(rows, "Atto 2", "2026-01-01 00:10:00 UTC")
@@ -106,6 +122,10 @@ def test_render_html_embeds_dashboard_data(tmp_path):
         "counts": [2, 5],
     }
     assert data["per_state"]["Atto 2"] == {"VIC": 3, "WA": 2}
+    assert data["series_by_state"]["Atto 2"]["VIC"]["Dynamic"] == {
+        "dates": ["2026-01-01T00:00:00Z", "2026-01-01T00:10:00Z"],
+        "counts": [2, 3],
+    }
     assert "graph.png" not in text
 
 
