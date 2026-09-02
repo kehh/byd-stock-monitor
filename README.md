@@ -89,6 +89,6 @@ The monitor and graph run automatically via GitHub Actions every 10 minutes.
 The generated history, graph and page are committed back to the repo and
 served on GitHub Pages at:
 
-    https://<your-user>.github.io/byd-stock-monitor/
+    https://kehh.github.io/byd-stock-monitor/
 
 (Set the Pages source to "Deploy from a branch" → `main` → `/` root.)
