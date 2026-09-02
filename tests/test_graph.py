@@ -69,6 +69,15 @@ def test_per_state_counts_latest_only(tmp_path):
     assert counts == {"VIC": 3, "WA": 2}
 
 
+def test_colour_traces_descending_by_count():
+    snapshot = {"A": 10, "B": 5, "C": 20}
+    traces = graph.colour_traces(snapshot)
+    assert len(traces) == 1
+    assert traces[0]["type"] == "bar"
+    assert traces[0]["x"] == ["C", "A", "B"]
+    assert traces[0]["y"] == [20, 10, 5]
+
+
 def test_series_to_traces_uses_dates_on_x_axis():
     series = {
         "VIC Dynamic": (["2026-01-01 00:00:00 UTC", "2026-01-02 05:30:00 UTC"], [2, 3]),

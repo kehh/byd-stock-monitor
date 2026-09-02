@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import csv
-import html
 import json
 from pathlib import Path
 
@@ -63,17 +62,6 @@ def per_state_counts(rows: list[dict], model: str, ts: str) -> dict[str, int]:
         if r["timestamp_utc"] == ts and r["model"] == model:
             counts[r["state"]] = counts.get(r["state"], 0) + int(r["count"])
     return counts
-
-
-def build_series(rows: list[dict]) -> dict[str, tuple[list[str], list[int]]]:
-    series: dict[str, tuple[list[str], list[int]]] = {}
-    for r in rows:
-        key = f"{r['state']} {r['variant']}"
-        if key not in series:
-            series[key] = ([], [])
-        series[key][0].append(r["timestamp_utc"])
-        series[key][1].append(int(r["count"]))
-    return series
 
 
 def to_iso(timestamp_utc: str) -> str:
