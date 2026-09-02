@@ -342,17 +342,6 @@ def variant_of(card: dict) -> str:
     return "Demo" if is_demo(card) else (card.get("variant") or "Unknown")
 
 
-def collect_stock_numbers(cards: list[dict], state: str) -> list[str]:
-    """Return sorted stock numbers found for a given state code."""
-    numbers = []
-    for c in cards:
-        state_tokens = set(c["state"])
-        if any(tok in STATE_NAMES and STATE_NAMES[tok] == state for tok in state_tokens):
-            if c.get("stock_number"):
-                numbers.append(c["stock_number"])
-    return sorted(numbers)
-
-
 def append_history(
     cards: list[dict],
     timestamp: str | None = None,
@@ -383,7 +372,7 @@ def append_history(
 
 
 def print_summary(cells: dict[tuple[str, str, str, str], list[str]]) -> None:
-    """Print total units per model (and state totals for the top model)."""
+    """Print total units per model."""
     if not cells:
         print("No vehicles found.")
         return
@@ -422,7 +411,6 @@ def main() -> int:
     targets = [c for c in cards if is_target(c)]
     print(f"Matches for Atto 2 Dynamic (all states): {len(targets)}")
 
-    cards = [c for c in cards if c.get("model") is not None]
     cells = collect_counts(cards)
     print_summary(cells)
     rows = append_history(cards)
