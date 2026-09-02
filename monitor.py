@@ -72,6 +72,68 @@ STATE_NAMES = {
     "do-tas": "TAS",
 }
 
+# Model tokens present in card classes, token -> display name.
+MODELS = {
+    "do-atto-1": "Atto 1",
+    "do-atto-2": "Atto 2",
+    "do-atto-3": "Atto 3",
+    "do-seal": "Seal",
+    "do-seal-6": "Seal 6",
+    "do-seal-6-touring": "Seal 6 Touring",
+    "do-sealion-5": "Sealion 5",
+    "do-sealion-6": "Sealion 6",
+    "do-sealion-7": "Sealion 7",
+    "do-sealion-8": "Sealion 8",
+    "do-shark-6": "Shark 6",
+    "do-dolphin": "Dolphin",
+}
+
+# Paint colour tokens present in card classes. Wheel tokens such as
+# do-15steel / do-18blackalloy are NOT colours and do not belong here.
+COLOURS = {
+    "do-apricitywhite": "Apricity White",
+    "do-arcticblue": "Arctic Blue",
+    "do-arcticwhite": "Arctic White",
+    "do-atlantisgrey": "Atlantis Grey",
+    "do-aurorawhite": "Aurora White",
+    "do-black": "Black",
+    "do-blackbrown": "Black Brown",
+    "do-blackgrey": "Black Grey",
+    "do-bluegrey": "Blue Grey",
+    "do-cosmosblack": "Cosmos Black",
+    "do-darkaquamarine": "Dark Aquamarine",
+    "do-deepseablue": "Deep Sea Blue",
+    "do-greatwhite": "Great White",
+    "do-greyblack": "Grey Black",
+    "do-harbourgrey": "Harbour Grey",
+    "do-mistgrey": "Mist Grey",
+    "do-outbackorange": "Outback Orange",
+    "do-pinelime": "Pine Lime",
+    "do-ridgegrey": "Ridge Grey",
+    "do-sagegreen": "Sage Green",
+    "do-sharkgrey": "Shark Grey",
+    "do-skiwhite": "Ski White",
+    "do-stonegrey": "Stone Grey",
+    "do-thaumasblack": "Thaumas Black",
+    "do-tidalblack": "Tidal Black",
+}
+
+MODEL_TOKENS = set(MODELS)
+COLOUR_TOKENS = set(COLOURS)
+
+VARIANT_TOKENS = {
+    "do-essential", "do-premium", "do-performance", "do-dynamic", "do-dynamicawd",
+    "do-dynamicfwd", "do-dynamiccabchassis", "do-dynamicextended", "do-premiumextended",
+    "do-premiumawd",
+}
+
+STATUS_TOKENS = {"do-available-now", "do-in-transit", "do-arriving-soon"}
+
+MISC_TOKENS = {"do-allmodel", "do-n"}
+
+# Wheel tokens: do-15steel, do-16alloy, do-18blackalloy, do-20alloywheels, ...
+WHEEL_RE = re.compile(r"do-\d+(?:black)?(?:alloywheels?|steel|alloy)$")
+
 REQUEST_TIMEOUT = 60
 
 
@@ -96,6 +158,22 @@ def fetch_inventory_html() -> str:
     req = Request(INVENTORY_URL, headers={"User-Agent": USER_AGENT})
     with urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
         return resp.read().decode("utf-8")
+
+
+def model_of(card: dict) -> str:
+    """Return the canonical model display name for a card, or "Unknown"."""
+    for tok in card["state"]:
+        if tok in MODELS:
+            return MODELS[tok]
+    return "Unknown"
+
+
+def colour_of(card: dict) -> str:
+    """Return the canonical paint display name for a card, or "Unknown"."""
+    for tok in card["state"]:
+        if tok in COLOURS:
+            return COLOURS[tok]
+    return "Unknown"
 
 
 def parse_cards(html: str) -> list[dict]:
@@ -130,8 +208,12 @@ def parse_cards(html: str) -> list[dict]:
                 "year": proc_match.group(1) if proc_match else None,
                 "status": status,
                 "state": [t for t in tokens if t.startswith("do-") and t != "do-n"],
+                "model": "",  # filled in below via the token maps
+                "colour": "",
             }
         )
+        cards[-1]["model"] = model_of(cards[-1])
+        cards[-1]["colour"] = colour_of(cards[-1])
     return cards
 
 
