@@ -80,10 +80,13 @@ to "Unknown".
 ## Dashboard
 
 `index.html` is a model-spotlight page: pick a model from the chip bar to
-see its colour breakdown (bar chart), variant time-series (line chart), and
+see its variant time-series (line chart, in the viewer's local timezone) and
 per-state counts. The units-over-time chart can be sliced per state via the
-state pills below it. Built with Tailwind CSS, Alpine.js and Plotly.js, all
-loaded from CDN — no build step required.
+state pills below it, and the current view is captured in the URL fragment
+(`#model=…&state=…`) so reloads and links restore it. The page fetches
+`data.json` every minute to refresh the charts in place without a full reload.
+Built with Tailwind CSS, Alpine.js and Plotly.js, all loaded from CDN — no
+build step required.
 
 ## Enabling email notifications
 

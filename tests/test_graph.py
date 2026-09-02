@@ -50,12 +50,6 @@ def test_latest_timestamp_returns_max(tmp_path):
     assert graph.latest_timestamp(rows) == "2026-01-01 00:10:00 UTC"
 
 
-def test_colour_snapshot_filters_to_latest_ts_and_model(tmp_path):
-    rows = graph.load_history(write_history(tmp_path, EXAMPLE_ROWS))
-    snap = graph.colour_snapshot(rows, "Atto 2", "2026-01-01 00:10:00 UTC")
-    assert snap == {"Thaumas Black": 5}
-
-
 def test_variant_series_sums_cells_per_poll(tmp_path):
     rows = graph.load_history(write_history(tmp_path, EXAMPLE_ROWS))
     series = graph.variant_series(rows, "Atto 2")
@@ -85,15 +79,6 @@ def test_per_state_counts_latest_only(tmp_path):
     assert counts == {"VIC": 3, "WA": 2}
 
 
-def test_colour_traces_descending_by_count():
-    snapshot = {"A": 10, "B": 5, "C": 20}
-    traces = graph.colour_traces(snapshot)
-    assert len(traces) == 1
-    assert traces[0]["type"] == "bar"
-    assert traces[0]["x"] == ["C", "A", "B"]
-    assert traces[0]["y"] == [20, 10, 5]
-
-
 def test_series_to_traces_uses_dates_on_x_axis():
     series = {
         "VIC Dynamic": (["2026-01-01 00:00:00 UTC", "2026-01-02 05:30:00 UTC"], [2, 3]),
@@ -102,6 +87,25 @@ def test_series_to_traces_uses_dates_on_x_axis():
     assert traces[0]["name"] == "VIC Dynamic"
     assert traces[0]["x"] == ["2026-01-01T00:00:00Z", "2026-01-02T05:30:00Z"]
     assert traces[0]["y"] == [2, 3]
+
+
+def test_write_data_json(tmp_path):
+    p = write_history(tmp_path, EXAMPLE_ROWS)
+    rows = graph.load_history(p)
+    out = tmp_path / "data.json"
+    data = graph.write_data_json(rows, out)
+    assert set(data["models"]) == {"Atto 2", "Sealion 8"}
+    assert "snapshots" not in data
+    assert data["timeseries"]["Atto 2"]["Dynamic"] == {
+        "dates": ["2026-01-01T00:00:00Z", "2026-01-01T00:10:00Z"],
+        "counts": [2, 5],
+    }
+    assert data["per_state"]["Atto 2"] == {"VIC": 3, "WA": 2}
+    assert data["series_by_state"]["Atto 2"]["VIC"]["Dynamic"] == {
+        "dates": ["2026-01-01T00:00:00Z", "2026-01-01T00:10:00Z"],
+        "counts": [2, 3],
+    }
+    assert json.loads(out.read_text()) == data
 
 
 def test_render_html_embeds_dashboard_data(tmp_path):
@@ -116,17 +120,22 @@ def test_render_html_embeds_dashboard_data(tmp_path):
     assert "const MODELS = " in text
     data = json.loads(text.split("const MODELS = ")[1].split(";")[0])
     assert set(data["models"]) == {"Atto 2", "Sealion 8"}
-    assert data["snapshots"]["Atto 2"] == {"Thaumas Black": 5}
-    assert data["timeseries"]["Atto 2"]["Dynamic"] == {
-        "dates": ["2026-01-01T00:00:00Z", "2026-01-01T00:10:00Z"],
-        "counts": [2, 5],
-    }
-    assert data["per_state"]["Atto 2"] == {"VIC": 3, "WA": 2}
-    assert data["series_by_state"]["Atto 2"]["VIC"]["Dynamic"] == {
-        "dates": ["2026-01-01T00:00:00Z", "2026-01-01T00:10:00Z"],
-        "counts": [2, 3],
-    }
+    assert "snapshots" not in data
     assert "graph.png" not in text
+
+
+def test_render_html_has_state_pills_and_fragment_sync(tmp_path):
+    rows = graph.load_history(write_history(tmp_path, EXAMPLE_ROWS))
+    out = tmp_path / "index.html"
+    graph.render_html(rows, out)
+    text = out.read_text()
+    assert "model.states" in text
+    assert "history.replaceState" in text
+    assert "URLSearchParams" in text
+    assert "renderSeries()" in text
+    assert "data.json" in text
+    assert "setInterval" in text
+    assert "toLocaleString" in text
 
 
 def test_render_html_empty_state(tmp_path):

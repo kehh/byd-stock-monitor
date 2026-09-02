@@ -10,6 +10,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 INDEX_FILE = BASE_DIR / "index.html"
 HISTORY_FILE = BASE_DIR / "history.csv"
+DATA_FILE = BASE_DIR / "data.json"
 
 PLOTLY_CDN = "https://cdn.plot.ly/plotly-2.35.2.min.js"
 
@@ -32,14 +33,6 @@ def load_history(path: Path) -> list[dict]:
 
 def latest_timestamp(rows: list[dict]) -> str:
     return max(r["timestamp_utc"] for r in rows)
-
-
-def colour_snapshot(rows: list[dict], model: str, ts: str) -> dict[str, int]:
-    snap: dict[str, int] = {}
-    for r in rows:
-        if r["timestamp_utc"] == ts and r["model"] == model:
-            snap[r["colour"]] = snap.get(r["colour"], 0) + int(r["count"])
-    return snap
 
 
 def variant_series(rows: list[dict], model: str) -> dict[str, tuple[list[str], list[int]]]:
@@ -105,22 +98,9 @@ def series_to_traces(series: dict[str, tuple[list[str], list[int]]]) -> list[dic
     return traces
 
 
-def colour_traces(snapshot: dict[str, int]) -> list[dict]:
-    items = sorted(snapshot.items(), key=lambda kv: (-kv[1], kv[0]))
-    return [
-        {
-            "x": [name for name, _ in items],
-            "y": [count for _, count in items],
-            "type": "bar",
-            "marker": {"color": COLORS[: len(items)] or COLORS},
-        }
-    ]
-
-
 def _build_dashboard_data(rows: list[dict]) -> dict:
     ts = latest_timestamp(rows)
     models = sorted({r["model"] for r in rows})
-    snapshots = {m: colour_snapshot(rows, m, ts) for m in models}
     timeseries = {}
     for m in models:
         ts_series = {}
@@ -147,12 +127,20 @@ def _build_dashboard_data(rows: list[dict]) -> dict:
     return {
         "models": models,
         "latest_ts": ts,
-        "snapshots": snapshots,
         "timeseries": timeseries,
         "per_state": per_state,
         "series_by_state": per_model_series,
         "states": states,
     }
+
+
+def write_data_json(rows: list[dict], out_path: Path) -> dict:
+    if not rows:
+        out_path.write_text("{}")
+        return {}
+    data = _build_dashboard_data(rows)
+    out_path.write_text(json.dumps(data))
+    return data
 
 
 TAILWIND_CDN = "https://cdn.tailwindcss.com"
@@ -181,14 +169,14 @@ def render_html(rows: list[dict], out_path: Path) -> Path:
 <script src="{PLOTLY_CDN}"></script>
 <script src="{ALPINE_CDN}" defer></script>
 </head>
-<body class="bg-slate-100 text-slate-800" x-data="dashboard()" x-init="select('{first_model}')">
+<body class="bg-slate-100 text-slate-800" x-data="dashboard()" x-init="init()">
 <header class="bg-white border-b border-slate-200">
   <div class="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
     <div>
       <h1 class="text-2xl font-bold">BYD Stock Monitor</h1>
-      <p class="text-sm text-slate-500">Australian dealership inventory by model, variant &amp; colour. Times are UTC.</p>
+      <p class="text-sm text-slate-500">Australian dealership inventory by model, variant &amp; colour. Times shown in your local timezone.</p>
     </div>
-    <div class="text-right text-sm text-slate-500" x-text="'Latest poll: ' + model.latest_ts"></div>
+    <div class="text-right text-sm text-slate-500" x-text="'Latest poll: ' + latestDisplay"></div>
   </div>
   <nav class="max-w-5xl mx-auto px-6 pb-3 flex flex-wrap gap-2">
     <template x-for="m in model.models" :key="m">
@@ -204,17 +192,6 @@ def render_html(rows: list[dict], out_path: Path) -> Path:
 
 <main class="max-w-5xl mx-auto px-6 py-6 space-y-6">
   <section class="bg-white rounded-xl shadow-sm p-6">
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-lg font-semibold" x-text="selected + ' — colour availability'"></h2>
-      <div class="flex items-center gap-3 text-sm">
-        <span class="text-slate-500">Total units</span>
-        <span class="text-2xl font-bold text-sky-600" x-text="total"></span>
-      </div>
-    </div>
-    <div id="colourChart" class="h-64"></div>
-  </section>
-
-  <section class="bg-white rounded-xl shadow-sm p-6">
     <div class="flex items-center justify-between mb-1">
       <h2 class="text-lg font-semibold" x-text="selected + ' — units over time'"></h2>
     </div>
@@ -226,7 +203,7 @@ def render_html(rows: list[dict], out_path: Path) -> Path:
           class="px-3 py-1 rounded-full text-xs font-medium transition"
           :class="seriesState === s ? 'bg-sky-600 text-white shadow' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'"
           x-text="s"
-          @click="seriesState = s; renderSeries()"></button>
+          @click="setState(s)"></button>
       </template>
     </div>
     <div id="seriesChart" class="h-80"></div>
@@ -248,31 +225,61 @@ def render_html(rows: list[dict], out_path: Path) -> Path:
 
 <script>
 const MODELS = {data_json};
+const REFRESH_MS = 60000;
+
+function toLocal(iso) {{
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+}}
 
 function dashboard() {{
   return {{
     selected: null,
     seriesState: "All states",
     model: MODELS,
-    get total() {{ return Object.values(this.model.snapshots[this.selected] || {{}}).reduce((a, b) => a + b, 0); }},
     get stateCounts() {{ return this.model.per_state[this.selected] || {{}}; }},
+    get latestDisplay() {{
+      if (!this.model.latest_ts) return "—";
+      const iso = this.model.latest_ts.replace(" UTC", "Z");
+      return new Date(iso).toLocaleString();
+    }},
+    init() {{
+      const params = new URLSearchParams(location.hash.slice(1));
+      this.selected = MODELS.models.includes(params.get("model")) ? params.get("model") : MODELS.models[0];
+      this.seriesState = MODELS.states.includes(params.get("state")) ? params.get("state") : "All states";
+      this.renderSeries();
+      this.syncHash();
+      setInterval(() => this.refresh(), REFRESH_MS);
+    }},
+    syncHash() {{
+      const params = new URLSearchParams();
+      params.set("model", this.selected);
+      if (this.seriesState !== "All states") params.set("state", this.seriesState);
+      history.replaceState(null, "", "#" + params.toString());
+    }},
     select(name) {{
       this.selected = name;
       this.seriesState = "All states";
-      const snap = this.model.snapshots[name] || {{}};
-      const sorted = Object.entries(snap).sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
-      Plotly.react("colourChart", {{
-        x: sorted.map(([colour]) => colour),
-        y: sorted.map(([, n]) => n),
-        type: "bar",
-        marker: {{ color: "#0ea5e9" }},
-      }}, {{
-        xaxis: {{ title: "Colour", tickangle: -30 }},
-        yaxis: {{ title: "Units available" }},
-        margin: {{ t: 10, r: 10, b: 80, l: 50 }},
-        colorway: ["#0ea5e9", "#0369a1", "#f59e0b", "#ef4444", "#10b981", "#8b5cf6", "#f97316", "#14b8a6", "#e11d48", "#84cc16"],
-      }});
+      this.syncHash();
       this.renderSeries();
+    }},
+    setState(s) {{
+      this.seriesState = s;
+      this.syncHash();
+      this.renderSeries();
+    }},
+    async refresh() {{
+      try {{
+        const res = await fetch("data.json?t=" + Date.now(), {{ cache: "no-store" }});
+        if (!res.ok) return;
+        const fresh = await res.json();
+        this.model = fresh;
+        if (!fresh.states.includes(this.seriesState)) this.seriesState = "All states";
+        if (!fresh.models.includes(this.selected)) this.selected = fresh.models[0];
+        this.syncHash();
+        this.renderSeries();
+      }} catch (e) {{ /* keep current view on network error */ }}
     }},
     renderSeries() {{
       const name = this.selected;
@@ -281,7 +288,7 @@ function dashboard() {{
         : (this.model.series_by_state[name] || {{}})[this.seriesState] || {{}};
       const traces = Object.entries(ts).map(([variant, {{dates, counts}}], i) => ({{
         name: variant,
-        x: dates,
+        x: dates.map(toLocal),
         y: counts,
         mode: "lines+markers",
         line: {{ width: 2 }},
@@ -289,7 +296,7 @@ function dashboard() {{
         color: ["#0ea5e9", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#14b8a6"][i % 6],
       }}));
       Plotly.react("seriesChart", traces, {{
-        xaxis: {{ title: "Date (UTC)" }},
+        xaxis: {{ title: "Time (local)", type: "date" }},
         yaxis: {{ title: "Units available" }},
         legend: {{ orientation: "h", y: -0.25 }},
         margin: {{ t: 10, r: 10, b: 50, l: 50 }},
@@ -310,11 +317,13 @@ def main() -> int:
     if not rows:
         print("No valid history yet; rendering empty state.", flush=True)
         render_html([], INDEX_FILE)
+        write_data_json([], DATA_FILE)
         return 0
     data = _build_dashboard_data(rows)
     render_html(rows, INDEX_FILE)
+    write_data_json(rows, DATA_FILE)
     n_models = len(data["models"])
-    print(f"Rendered dashboard ({n_models} models) to {INDEX_FILE.name}", flush=True)
+    print(f"Rendered dashboard ({n_models} models) to {INDEX_FILE.name} and {DATA_FILE.name}", flush=True)
     return 0
 
 
