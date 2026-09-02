@@ -99,49 +99,162 @@ def series_to_traces(series: dict[str, tuple[list[str], list[int]]]) -> list[dic
     return traces
 
 
-def render_html(
-    series: dict[str, tuple[list[str], list[int]]],
-    out_path: Path,
-) -> Path:
-    traces = series_to_traces(series)
-    traces_json = json.dumps(traces)
-    rows_html = "".join(
-        f"<tr><td>{html.escape(label)}</td><td>{counts[-1] if counts else 0}</td></tr>"
-        for label, (_, counts) in sorted(series.items())
-    )
+def colour_traces(snapshot: dict[str, int]) -> list[dict]:
+    items = sorted(snapshot.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [
+        {
+            "x": [name for name, _ in items],
+            "y": [count for _, count in items],
+            "type": "bar",
+            "marker": {"color": COLORS[: len(items)] or COLORS},
+        }
+    ]
+
+
+def _build_dashboard_data(rows: list[dict]) -> dict:
+    ts = latest_timestamp(rows)
+    models = sorted({r["model"] for r in rows})
+    snapshots = {m: colour_snapshot(rows, m, ts) for m in models}
+    timeseries = {}
+    for m in models:
+        ts_series = {}
+        for variant, (dates, counts) in variant_series(rows, m).items():
+            ts_series[variant] = {
+                "dates": [to_iso(d) for d in dates],
+                "counts": counts,
+            }
+        timeseries[m] = ts_series
+    per_state = {m: per_state_counts(rows, m, ts) for m in models}
+    return {
+        "models": models,
+        "latest_ts": ts,
+        "snapshots": snapshots,
+        "timeseries": timeseries,
+        "per_state": per_state,
+    }
+
+
+TAILWIND_CDN = "https://cdn.tailwindcss.com"
+ALPINE_CDN = "https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"
+
+
+def render_html(rows: list[dict], out_path: Path) -> Path:
+    if not rows:
+        out_path.write_text(
+            "<!DOCTYPE html>\n<html><body><h1>BYD Stock Monitor</h1>"
+            "<p>No data yet.</p></body></html>\n"
+        )
+        return out_path
+
+    data = _build_dashboard_data(rows)
+    data_json = json.dumps(data)
+    first_model = data["models"][0]
+
     content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BYD Atto 2 Stock Monitor</title>
+<title>BYD Stock Monitor</title>
+<script src="{TAILWIND_CDN}"></script>
 <script src="{PLOTLY_CDN}"></script>
-<style>
-body {{ font-family: sans-serif; margin: 2rem auto; max-width: 1000px; padding: 0 1rem; }}
-h1 {{ font-size: 1.5rem; }}
-h2 {{ font-size: 1.1rem; }}
-table {{ border-collapse: collapse; margin-top: 1rem; }}
-th, td {{ border: 1px solid #ccc; padding: 0.4rem 0.8rem; text-align: left; }}
-</style>
+<script src="{ALPINE_CDN}" defer></script>
 </head>
-<body>
-<h1>BYD Atto 2 Stock Monitor</h1>
-<p>Click a legend entry to show or hide that series. Hover over points
-for details. Times are UTC.</p>
-<div id="chart"></div>
-<h2>Latest counts by state &amp; variant:</h2>
-<table>
-<tr><th>State / Variant</th><th>Latest count</th></tr>
-{rows_html}
-</table>
+<body class="bg-slate-100 text-slate-800" x-data="dashboard()" x-init="select('{first_model}')">
+<header class="bg-white border-b border-slate-200">
+  <div class="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold">BYD Stock Monitor</h1>
+      <p class="text-sm text-slate-500">Australian dealership inventory by model, variant &amp; colour. Times are UTC.</p>
+    </div>
+    <div class="text-right text-sm text-slate-500" x-text="'Latest poll: ' + model.latest_ts"></div>
+  </div>
+  <nav class="max-w-5xl mx-auto px-6 pb-3 flex flex-wrap gap-2">
+    <template x-for="m in model.models" :key="m">
+      <button
+        type="button"
+        class="px-4 py-1.5 rounded-full text-sm font-medium transition"
+        :class="selected === m ? 'bg-sky-600 text-white shadow' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'"
+        x-text="m"
+        @click="select(m)"></button>
+    </template>
+  </nav>
+</header>
+
+<main class="max-w-5xl mx-auto px-6 py-6 space-y-6">
+  <section class="bg-white rounded-xl shadow-sm p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-semibold" x-text="selected + ' — colour availability'"></h2>
+      <div class="flex items-center gap-3 text-sm">
+        <span class="text-slate-500">Total units</span>
+        <span class="text-2xl font-bold text-sky-600" x-text="total"></span>
+      </div>
+    </div>
+    <div id="colourChart" class="h-64"></div>
+  </section>
+
+  <section class="bg-white rounded-xl shadow-sm p-6">
+    <h2 class="text-lg font-semibold mb-1" x-text="selected + ' — units over time'"></h2>
+    <p class="text-sm text-slate-500 mb-4">Click a legend entry to show or hide that variant.</p>
+    <div id="seriesChart" class="h-80"></div>
+  </section>
+
+  <section class="bg-white rounded-xl shadow-sm p-6">
+    <h2 class="text-lg font-semibold mb-4" x-text="selected + ' — counts by state'"></h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <template x-for="(count, state) in stateCounts" :key="state">
+        <div class="bg-slate-50 rounded-lg p-3 border border-slate-200">
+          <div class="text-sm text-slate-500" x-text="state"></div>
+          <div class="text-2xl font-semibold" x-text="count"></div>
+        </div>
+      </template>
+      <div x-show="Object.keys(stateCounts).length === 0" class="col-span-full text-slate-400 text-sm">No state counts yet.</div>
+    </div>
+  </section>
+</main>
+
 <script>
-const TRACES = {traces_json};
-Plotly.newPlot("chart", TRACES, {{
-  xaxis: {{ title: "Date (UTC)" }},
-  yaxis: {{ title: "Units available" }},
-  legend: {{ orientation: "h", y: -0.2 }},
-  margin: {{ t: 20, r: 20, b: 50, l: 60 }},
-}});
+const MODELS = {data_json};
+
+function dashboard() {{
+  return {{
+    selected: null,
+    model: MODELS,
+    get total() {{ return Object.values(this.model.snapshots[this.selected] || {{}}).reduce((a, b) => a + b, 0); }},
+    get stateCounts() {{ return this.model.per_state[this.selected] || {{}}; }},
+    select(name) {{
+      this.selected = name;
+      const snap = this.model.snapshots[name] || {{}};
+      Plotly.react("colourChart", {{
+        x: Object.keys(snap).sort((a, b) => snap[b] - snap[a]),
+        y: Object.values(snap).sort((a, b) => b - a),
+        type: "bar",
+        marker: {{ color: "#0ea5e9" }},
+      }}, {{
+        xaxis: {{ title: "Colour", tickangle: -30 }},
+        yaxis: {{ title: "Units available" }},
+        margin: {{ t: 10, r: 10, b: 80, l: 50 }},
+        colorway: ["#0ea5e9", "#0369a1", "#f59e0b", "#ef4444", "#10b981", "#8b5cf6", "#f97316", "#14b8a6", "#e11d48", "#84cc16"],
+      }});
+      const ts = this.model.timeseries[name] || {{}};
+      const traces = Object.entries(ts).map(([variant, {{dates, counts}}], i) => ({{
+        name: variant,
+        x: dates,
+        y: counts,
+        mode: "lines+markers",
+        line: {{ width: 2 }},
+        marker: {{ size: 6 }},
+        color: ["#0ea5e9", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#14b8a6"][i % 6],
+      }}));
+      Plotly.react("seriesChart", traces, {{
+        xaxis: {{ title: "Date (UTC)" }},
+        yaxis: {{ title: "Units available" }},
+        legend: {{ orientation: "h", y: -0.25 }},
+        margin: {{ t: 10, r: 10, b: 50, l: 50 }},
+      }});
+    }},
+  }};
+}}
 </script>
 </body>
 </html>
@@ -151,13 +264,15 @@ Plotly.newPlot("chart", TRACES, {{
 
 
 def main() -> int:
-    if not HISTORY_FILE.exists():
-        print("No history.csv yet; nothing to render.", flush=True)
-        return 0
     rows = load_history(HISTORY_FILE)
-    series = build_series(rows)
-    render_html(series, INDEX_FILE)
-    print(f"Rendered {len(series)} series to {INDEX_FILE.name}", flush=True)
+    if not rows:
+        print("No valid history yet; rendering empty state.", flush=True)
+        render_html([], INDEX_FILE)
+        return 0
+    data = _build_dashboard_data(rows)
+    render_html(rows, INDEX_FILE)
+    n_models = len(data["models"])
+    print(f"Rendered dashboard ({n_models} models) to {INDEX_FILE.name}", flush=True)
     return 0
 
 
