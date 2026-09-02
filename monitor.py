@@ -44,7 +44,7 @@ INVENTORY_URL = "https://evdealergroup-byd.com.au/inventory?type=d"
 STATE_FILE = BASE_DIR / "state.json"
 LOG_FILE = BASE_DIR / "notifications.log"
 HISTORY_FILE = BASE_DIR / "history.csv"
-HISTORY_HEADER = ("timestamp_utc", "state", "variant", "count", "stock_numbers")
+HISTORY_HEADER = ("timestamp_utc", "state", "model", "variant", "colour", "count", "stock_numbers")
 
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -307,22 +307,22 @@ def send_email(matches: list[dict]) -> None:
     print(f"Email sent to {to_email}")
 
 
-def count_by_state(cards: list[dict]) -> dict[str, dict[str, int]]:
-    """Return {state_name: {variant_name: count}} for a list of matching cards.
+def collect_counts(cards: list[dict]) -> dict[tuple[str, str, str, str], list[str]]:
+    """Return {(state, model, variant, colour): [stock_numbers]} for validated cards.
 
-    Variants counted are those advertised in the card variant field (e.g.
-    "Dynamic", "Premium") plus "Demo" for any demonstration units.
+    A card is validated when it has a stock number and a status of
+    "available" or "in-transit" (same rule the Atto 2 filter used).
     """
-    counts: dict[str, dict[str, int]] = {}
+    cells: dict[tuple[str, str, str, str], list[str]] = {}
     for c in cards:
-        for tok in c["state"]:
-            if tok in STATE_NAMES:
-                name = STATE_NAMES[tok]
-                variant = "Demo" if is_demo(c) else (c["variant"] or "Unknown")
-                per_state = counts.setdefault(name, {})
-                per_state[variant] = per_state.get(variant, 0) + 1
-                break
-    return counts
+        if c.get("stock_number") is None or c.get("status") not in {"available", "in-transit"}:
+            continue
+        state = next((STATE_NAMES[t] for t in c["state"] if t in STATE_NAMES), None)
+        if state is None:
+            continue
+        key = (state, c.get("model") or "Unknown", variant_of(c), c.get("colour") or "Unknown")
+        cells.setdefault(key, []).append(c["stock_number"])
+    return cells
 
 
 def is_demo(card: dict) -> bool:
@@ -355,66 +355,46 @@ def collect_stock_numbers(cards: list[dict], state: str) -> list[str]:
 
 def append_history(
     cards: list[dict],
-    counts: dict[str, dict[str, int]],
     timestamp: str | None = None,
 ) -> int:
-    """Append one row per (state, variant) to HISTORY_FILE. Returns rows written."""
+    """Append one row per (state, model, variant, colour) cell. Returns rows written."""
     ts = timestamp or utc_now()
+    cells = collect_counts(cards)
     exists = HISTORY_FILE.exists()
     rows_written = 0
     with HISTORY_FILE.open("a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=HISTORY_HEADER)
         if not exists:
             writer.writeheader()
-        for state in sorted(counts):
-            per_state = counts[state]
-            stocks = collect_stock_numbers(cards, state)
-            for variant in ["Dynamic", "Premium", "Demo", "Unknown"]:
-                if variant not in per_state:
-                    continue
-                writer.writerow(
-                    {
-                        "timestamp_utc": ts,
-                        "state": state,
-                        "variant": variant,
-                        "count": per_state[variant],
-                        "stock_numbers": ";".join(stocks),
-                    }
-                )
-                rows_written += 1
+        for (state, model, variant, colour), stocks in sorted(cells.items()):
+            writer.writerow(
+                {
+                    "timestamp_utc": ts,
+                    "state": state,
+                    "model": model,
+                    "variant": variant,
+                    "colour": colour,
+                    "count": len(stocks),
+                    "stock_numbers": ";".join(sorted(stocks)),
+                }
+            )
+            rows_written += 1
     return rows_written
 
 
-def print_state_table(counts: dict[str, dict[str, int]]) -> None:
-    """Print a table of per-state variant counts for Atto 2."""
-    if not counts:
-        print("No Atto 2 vehicles found.")
+def print_summary(cells: dict[tuple[str, str, str, str], list[str]]) -> None:
+    """Print total units per model (and state totals for the top model)."""
+    if not cells:
+        print("No vehicles found.")
         return
+    by_model: dict[str, int] = {}
+    for (state, model, variant, colour), stocks in sorted(cells.items()):
+        by_model[model] = by_model.get(model, 0) + len(stocks)
 
-    variants = ["Dynamic", "Premium", "Demo"]
-    present = sorted({v for per_state in counts.values() for v in per_state})
-    order = [v for v in variants if v in present] + [
-        v for v in present if v not in variants
-    ]
-
-    header = "State   | " + " | ".join(f"{v:<9}" for v in order) + " | Total"
-    print("Atto 2 units by state:") 
-    print(header)
-    print("-" * len(header))
-
-    grand_total = 0
-    for state in sorted(counts, key=lambda s: -sum(counts[s].values())):
-        row = counts[state]
-        total = sum(row.values())
-        grand_total += total
-        cells = " | ".join(f"{row.get(v, 0):<9}" for v in order)
-        print(f"{state:<7} | " + cells + f" | {total}")
-
-    print("-" * len(header))
-    total_cells = " | ".join(
-        f"{sum(r.get(v, 0) for r in counts.values()):<9}" for v in order
-    )
-    print(f"{'Total':<7} | " + total_cells + f" | {grand_total}")
+    print("Units by model:")
+    for model, n in sorted(by_model.items(), key=lambda kv: -kv[1]):
+        print(f"  {model:<14} {n}")
+    print(f"  {'Total':<14} {sum(by_model.values())}")
 
 
 def log_matches(matches: list[dict]) -> None:
@@ -442,10 +422,10 @@ def main() -> int:
     targets = [c for c in cards if is_target(c)]
     print(f"Matches for Atto 2 Dynamic (all states): {len(targets)}")
 
-    atto2_cards = [c for c in cards if is_atto2(c)]
-    by_state = count_by_state(atto2_cards)
-    print_state_table(by_state)
-    rows = append_history(atto2_cards, by_state)
+    cards = [c for c in cards if c.get("model") is not None]
+    cells = collect_counts(cards)
+    print_summary(cells)
+    rows = append_history(cards)
     print(f"Logged {rows} history row(s) to {HISTORY_FILE.name}")
 
     seen = load_state()
