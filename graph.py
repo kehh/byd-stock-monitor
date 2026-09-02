@@ -22,8 +22,47 @@ COLORS = [
 
 
 def load_history(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
     with path.open(newline="") as f:
-        return list(csv.DictReader(f))
+        rows = list(csv.DictReader(f))
+    if rows and "model" not in rows[0]:
+        return []  # old schema
+    return rows
+
+
+def latest_timestamp(rows: list[dict]) -> str:
+    return max(r["timestamp_utc"] for r in rows)
+
+
+def colour_snapshot(rows: list[dict], model: str, ts: str) -> dict[str, int]:
+    snap: dict[str, int] = {}
+    for r in rows:
+        if r["timestamp_utc"] == ts and r["model"] == model:
+            snap[r["colour"]] = snap.get(r["colour"], 0) + int(r["count"])
+    return snap
+
+
+def variant_series(rows: list[dict], model: str) -> dict[str, tuple[list[str], list[int]]]:
+    points: dict[str, dict[str, int]] = {}
+    for r in rows:
+        if r["model"] != model:
+            continue
+        bucket = points.setdefault(r["variant"], {})
+        bucket[r["timestamp_utc"]] = bucket.get(r["timestamp_utc"], 0) + int(r["count"])
+    series: dict[str, tuple[list[str], list[int]]] = {}
+    for variant, ts_counts in points.items():
+        ordered = sorted(ts_counts.items())
+        series[variant] = ([ts for ts, _ in ordered], [c for _, c in ordered])
+    return series
+
+
+def per_state_counts(rows: list[dict], model: str, ts: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for r in rows:
+        if r["timestamp_utc"] == ts and r["model"] == model:
+            counts[r["state"]] = counts.get(r["state"], 0) + int(r["count"])
+    return counts
 
 
 def build_series(rows: list[dict]) -> dict[str, tuple[list[str], list[int]]]:
