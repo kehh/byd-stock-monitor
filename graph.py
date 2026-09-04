@@ -20,6 +20,15 @@ COLORS = [
     "#393b79", "#9c9ede",
 ]
 
+# Dynamic and Premium keep the blue/orange used in the original dashboard.
+# Any other variant tier gets purple, then dark green, in alphabetical
+# order; a fifth or later tier falls back to color_for_variant's hash.
+TIER_COLORS = {
+    "Dynamic": "#0ea5e9",
+    "Premium": "#f59e0b",
+}
+EXTRA_TIER_COLORS = ["#8b5cf6", "#065f46"]
+
 
 def load_history(path: Path) -> list[dict]:
     if not path.exists():
@@ -81,18 +90,34 @@ def to_iso(timestamp_utc: str) -> str:
     return f"{date_part}T{time_part.split(' UTC')[0]}Z"
 
 
+def variant_tier(variant: str) -> str:
+    """Base trim shared by variant sub-types, e.g. 'Dynamic AWD' -> 'Dynamic'."""
+    return variant.split(" ", 1)[0] if variant else variant
+
+
 def color_for_variant(variant: str) -> str:
-    """Deterministic colour per variant name, stable across states and models."""
+    """Hash-based fallback colour for tiers beyond the four reserved ones."""
     h = 0
     for ch in variant:
         h = (h * 31 + ord(ch)) & 0xFFFFFFFF
     return COLORS[h % len(COLORS)]
 
 
+def build_tier_colors(variants) -> dict[str, str]:
+    """One colour per variant tier, stable across every state and model."""
+    tiers = sorted({variant_tier(v) for v in variants})
+    extra = iter(EXTRA_TIER_COLORS)
+    colors: dict[str, str] = {}
+    for tier in tiers:
+        colors[tier] = TIER_COLORS.get(tier) or next(extra, None) or color_for_variant(tier)
+    return colors
+
+
 def series_to_traces(series: dict[str, tuple[list[str], list[int]]]) -> list[dict]:
+    tier_colors = build_tier_colors(series.keys())
     traces = []
     for label, (timestamps, counts) in sorted(series.items()):
-        color = color_for_variant(label)
+        color = tier_colors[variant_tier(label)]
         traces.append(
             {
                 "name": label,
@@ -132,6 +157,7 @@ def _build_dashboard_data(rows: list[dict]) -> dict:
             }
         per_model_series[m] = m_series
     states = sorted({r["state"] for r in rows})
+    variant_colors = build_tier_colors(r["variant"] for r in rows)
     return {
         "models": models,
         "latest_ts": ts,
@@ -139,6 +165,7 @@ def _build_dashboard_data(rows: list[dict]) -> dict:
         "per_state": per_state,
         "series_by_state": per_model_series,
         "states": states,
+        "variant_colors": variant_colors,
     }
 
 
@@ -234,14 +261,20 @@ def render_html(rows: list[dict], out_path: Path) -> Path:
 <script>
 const MODELS = {data_json};
 const REFRESH_MS = 60000;
-const VARIANT_COLORS = {json.dumps(COLORS)};
+const FALLBACK_COLORS = {json.dumps(COLORS)};
 
-function colorForVariant(name) {{
+function variantTier(name) {{
+  return name.split(" ")[0];
+}}
+
+function colorForVariant(name, tierColors) {{
+  const tier = variantTier(name);
+  if (tierColors && tierColors[tier]) return tierColors[tier];
   let h = 0;
   for (let i = 0; i < name.length; i++) {{
     h = (h * 31 + name.charCodeAt(i)) >>> 0;
   }}
-  return VARIANT_COLORS[h % VARIANT_COLORS.length];
+  return FALLBACK_COLORS[h % FALLBACK_COLORS.length];
 }}
 
 function toLocal(iso) {{
@@ -304,7 +337,7 @@ function dashboard() {{
         ? this.model.timeseries[name] || {{}}
         : (this.model.series_by_state[name] || {{}})[this.seriesState] || {{}};
       const traces = Object.entries(ts).map(([variant, {{dates, counts}}]) => {{
-        const color = colorForVariant(variant);
+        const color = colorForVariant(variant, this.model.variant_colors);
         return {{
           name: variant,
           x: dates.map(toLocal),
