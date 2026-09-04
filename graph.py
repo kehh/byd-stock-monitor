@@ -20,6 +20,15 @@ COLORS = [
     "#393b79", "#9c9ede",
 ]
 
+# Dynamic and Premium keep the blue/orange used in the original dashboard.
+# Any other variant tier gets purple, then dark green, in alphabetical
+# order; a fifth or later tier falls back to color_for_variant's hash.
+TIER_COLORS = {
+    "Dynamic": "#1f77b4",
+    "Premium": "#ff7f0e",
+}
+EXTRA_TIER_COLORS = ["#8b5cf6", "#065f46"]
+
 
 def load_history(path: Path) -> list[dict]:
     if not path.exists():
@@ -81,18 +90,42 @@ def to_iso(timestamp_utc: str) -> str:
     return f"{date_part}T{time_part.split(' UTC')[0]}Z"
 
 
+def variant_tier(variant: str) -> str:
+    """Base trim shared by variant sub-types, e.g. 'Dynamic AWD' -> 'Dynamic'."""
+    return variant.split(" ", 1)[0] if variant else variant
+
+
+def color_for_variant(variant: str) -> str:
+    """Hash-based fallback colour for tiers beyond the four reserved ones."""
+    h = 0
+    for ch in variant:
+        h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+    return COLORS[h % len(COLORS)]
+
+
+def build_tier_colors(variants) -> dict[str, str]:
+    """One colour per variant tier, stable across every state and model."""
+    tiers = sorted({variant_tier(v) for v in variants})
+    extra = iter(EXTRA_TIER_COLORS)
+    colors: dict[str, str] = {}
+    for tier in tiers:
+        colors[tier] = TIER_COLORS.get(tier) or next(extra, None) or color_for_variant(tier)
+    return colors
+
+
 def series_to_traces(series: dict[str, tuple[list[str], list[int]]]) -> list[dict]:
+    tier_colors = build_tier_colors(series.keys())
     traces = []
-    for i, (label, (timestamps, counts)) in enumerate(sorted(series.items())):
+    for label, (timestamps, counts) in sorted(series.items()):
+        color = tier_colors[variant_tier(label)]
         traces.append(
             {
                 "name": label,
                 "x": [to_iso(ts) for ts in timestamps],
                 "y": counts,
                 "mode": "lines+markers",
-                "line": {"width": 2},
-                "marker": {"size": 6},
-                "color": COLORS[i % len(COLORS)],
+                "line": {"width": 2, "color": color},
+                "marker": {"size": 6, "color": color},
             }
         )
     return traces
@@ -124,6 +157,7 @@ def _build_dashboard_data(rows: list[dict]) -> dict:
             }
         per_model_series[m] = m_series
     states = sorted({r["state"] for r in rows})
+    variant_colors = build_tier_colors(r["variant"] for r in rows)
     return {
         "models": models,
         "latest_ts": ts,
@@ -131,6 +165,7 @@ def _build_dashboard_data(rows: list[dict]) -> dict:
         "per_state": per_state,
         "series_by_state": per_model_series,
         "states": states,
+        "variant_colors": variant_colors,
     }
 
 
@@ -226,6 +261,21 @@ def render_html(rows: list[dict], out_path: Path) -> Path:
 <script>
 const MODELS = {data_json};
 const REFRESH_MS = 60000;
+const FALLBACK_COLORS = {json.dumps(COLORS)};
+
+function variantTier(name) {{
+  return name.split(" ")[0];
+}}
+
+function colorForVariant(name, tierColors) {{
+  const tier = variantTier(name);
+  if (tierColors && tierColors[tier]) return tierColors[tier];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {{
+    h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  }}
+  return FALLBACK_COLORS[h % FALLBACK_COLORS.length];
+}}
 
 function toLocal(iso) {{
   const d = new Date(iso);
@@ -286,19 +336,24 @@ function dashboard() {{
       const ts = this.seriesState === "All states"
         ? this.model.timeseries[name] || {{}}
         : (this.model.series_by_state[name] || {{}})[this.seriesState] || {{}};
-      const traces = Object.entries(ts).map(([variant, {{dates, counts}}], i) => ({{
-        name: variant,
-        x: dates.map(toLocal),
-        y: counts,
-        mode: "lines+markers",
-        line: {{ width: 2 }},
-        marker: {{ size: 6 }},
-        color: ["#0ea5e9", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#14b8a6"][i % 6],
-      }}));
+      const traces = Object.entries(ts).map(([variant, {{dates, counts}}]) => {{
+        const color = colorForVariant(variant, this.model.variant_colors);
+        return {{
+          name: variant,
+          x: dates.map(toLocal),
+          y: counts,
+          mode: "lines+markers",
+          line: {{ width: 2, color }},
+          marker: {{ size: 6, color }},
+          hovertemplate: "%{{x}}<br>%{{y}} units<br>" + variant + "<extra></extra>",
+          hoverlabel: {{ bgcolor: color, font: {{ color: "#ffffff" }} }},
+        }};
+      }});
       Plotly.react("seriesChart", traces, {{
         xaxis: {{ title: "Time (local)", type: "date" }},
         yaxis: {{ title: "Units available" }},
         legend: {{ orientation: "h", y: -0.25 }},
+        showlegend: true,
         margin: {{ t: 10, r: 10, b: 50, l: 50 }},
       }});
     }},
