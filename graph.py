@@ -24,8 +24,8 @@ COLORS = [
 # Any other variant tier gets purple, then dark green, in alphabetical
 # order; a fifth or later tier falls back to color_for_variant's hash.
 TIER_COLORS = {
-    "Dynamic": "#0ea5e9",
-    "Premium": "#f59e0b",
+    "Dynamic": "#1f77b4",
+    "Premium": "#ff7f0e",
 }
 EXTRA_TIER_COLORS = ["#8b5cf6", "#065f46"]
 
