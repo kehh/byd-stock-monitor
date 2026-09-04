@@ -345,6 +345,8 @@ function dashboard() {{
           mode: "lines+markers",
           line: {{ width: 2, color }},
           marker: {{ size: 6, color }},
+          hovertemplate: "%{{x}}<br>%{{y}} units<br>" + variant + "<extra></extra>",
+          hoverlabel: {{ bgcolor: color, font: {{ color: "#ffffff" }} }},
         }};
       }});
       Plotly.react("seriesChart", traces, {{
